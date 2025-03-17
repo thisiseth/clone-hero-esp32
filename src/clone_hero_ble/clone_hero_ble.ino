@@ -7,6 +7,8 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
+#include "ws2812.h"
+
 #define BATTERY_ADC_UNIT ADC_UNIT_1
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_0 //gpio 0
 #define BATTERY_ADC_ATTEN ADC_ATTEN_DB_12
@@ -46,6 +48,7 @@
 #endif
 
 BleGamepad bleGamepad(DEVICE_NAME, "thisiseth");
+Ws2812 rgbLed(PIN_WS2812_LED_DATA);
 
 adc_oneshot_unit_handle_t battery_adc_handle;
 adc_cali_handle_t battery_adc_cali_handle;
@@ -143,8 +146,13 @@ void setup()
     if (digitalRead(PIN_MENU_POWER))
       goToSleep();
 
-  pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, 0);
+  pinMode(PIN_BUILTIN_LED, OUTPUT);
+  digitalWrite(PIN_BUILTIN_LED, 0);
+
+  pinMode(PIN_WS2812_LED_VCC, OUTPUT);
+  gpio_set_drive_capability((gpio_num_t)PIN_WS2812_LED_VCC, GPIO_DRIVE_CAP_3);
+  digitalWrite(PIN_WS2812_LED_VCC, 1);
+  rgbLed.SetColor(10,10,10);/////////////////////
 
   pinMode(PIN_STAR_BOOT, INPUT_PULLUP);
   pinMode(PIN_STRUM_UP, INPUT_PULLUP);
