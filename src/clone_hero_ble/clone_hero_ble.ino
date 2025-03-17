@@ -53,6 +53,17 @@ Ws2812 rgbLed(PIN_WS2812_LED_DATA);
 adc_oneshot_unit_handle_t battery_adc_handle;
 adc_cali_handle_t battery_adc_cali_handle;
 
+
+enum class RgbLedState
+{
+  None,
+  NotConnected,
+  Connected,
+  //
+};
+
+RgbLedState ws2812_state = RgbLedState::None;
+
 void goToSleep()
 {
   esp_deep_sleep_enable_gpio_wakeup(BIT(PIN_MENU_POWER), ESP_GPIO_WAKEUP_GPIO_LOW);
@@ -127,6 +138,25 @@ void update_battery_status()
   bleGamepad.setBatteryLevel(battery_percent);
 }
 
+void set_rgb_led_state(RgbLedState state)
+{
+  if (ws2812_state == state)
+    return;
+
+  switch (state)
+  {
+    case RgbLedState::None:
+      rgbLed.SetColor(0, 0, 0);
+      break;
+    case RgbLedState::NotConnected:
+      rgbLed.SetColor(0, 3, 0);
+      break;
+    case RgbLedState::Connected:
+      rgbLed.SetColor(2, 3, 3);
+      break;
+  }
+}
+
 void setup() 
 {
   battery_adc_init();
@@ -152,7 +182,7 @@ void setup()
   pinMode(PIN_WS2812_LED_VCC, OUTPUT);
   gpio_set_drive_capability((gpio_num_t)PIN_WS2812_LED_VCC, GPIO_DRIVE_CAP_3);
   digitalWrite(PIN_WS2812_LED_VCC, 1);
-  rgbLed.SetColor(10,10,10);/////////////////////
+  set_rgb_led_state(RgbLedState::NotConnected);
 
   pinMode(PIN_STAR_BOOT, INPUT_PULLUP);
   pinMode(PIN_STRUM_UP, INPUT_PULLUP);
@@ -222,6 +252,8 @@ void loop()
 
   if (bleGamepad.isConnected()) 
   {
+    set_rgb_led_state(RgbLedState::Connected);
+
     for (auto i = 0; i < 9; ++i)
     {
       auto mask = 1 << i;
@@ -242,6 +274,8 @@ void loop()
   }
   else
   {
+    set_rgb_led_state(RgbLedState::NotConnected);
+
     reportedButtons = 0;
 
     if ((millis() - lastActivityAt) > 10*60*1000) //10 mins if not connected
