@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <BleGamepad.h>
+#include "src/ESP32-BLE-Gamepad-0.7.3/BleGamepad.h"
 #include "driver/rtc_io.h"
 #include "esp_sleep.h"
 
@@ -14,13 +14,17 @@
 #define BATTERY_ADC_ATTEN ADC_ATTEN_DB_12
 #define BATTERY_ADC_BITWIDTH ADC_BITWIDTH_DEFAULT
 
+#define BATTERY_FULL_MV 4200
+#define BATTERY_EMPTY_MV 3100
+#define BATTERY_VERY_EMPTY_MV 2900
+
 #define PIN_BUILTIN_LED 8
 
 #define PIN_WS2812_LED_VCC 6
 #define PIN_WS2812_LED_DATA 7
 
 //buttons are active-low with pullups
-#define PIN_STAR_BOOT 9 //is also used as BOOT button
+#define PIN_STAR_BOOT 9 //is also used as BOOT button and PAIR button
 #define PIN_MENU_POWER 5 //is also used as POWER button
 
 #define CLONE_HERO_BLUE
@@ -53,12 +57,12 @@ Ws2812 rgbLed(PIN_WS2812_LED_DATA);
 adc_oneshot_unit_handle_t battery_adc_handle;
 adc_cali_handle_t battery_adc_cali_handle;
 
-
 enum class RgbLedState
 {
   None,
   NotConnected,
   Connected,
+  BatteryLow
   //
 };
 
@@ -66,6 +70,9 @@ RgbLedState ws2812_state = RgbLedState::None;
 
 void goToSleep()
 {
+  if (bleGamepad.disconnectAll())
+    delay(500);
+
   esp_deep_sleep_enable_gpio_wakeup(BIT(PIN_MENU_POWER), ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
 }
@@ -114,34 +121,20 @@ uint8_t get_battery_percent()
 {
   auto mv = get_battery_mv();
 
-  if (mv > 4200)
+  if (mv > BATTERY_FULL_MV)
     return 100;
-  if (mv < 3100)
+  if (mv < BATTERY_EMPTY_MV)
     return 0;
 
-  return (mv - 3100)/((4200 - 3100) / 100); //just linear aprox.
-}
-
-void update_battery_status()
-{
-  auto battery_percent = get_battery_percent();
-
-  if (battery_percent == 0)
-    goToSleep();
-
-  bleGamepad.setPowerStateAll(
-    POWER_STATE_PRESENT,
-    POWER_STATE_DISCHARGING,
-    POWER_STATE_NOT_CHARGING,
-    battery_percent > 10 ? POWER_STATE_GOOD : POWER_STATE_CRITICAL);
-
-  bleGamepad.setBatteryLevel(battery_percent);
+  return (mv - BATTERY_EMPTY_MV)/((BATTERY_FULL_MV - BATTERY_EMPTY_MV) / 100); //just linear aprox.
 }
 
 void set_rgb_led_state(RgbLedState state)
 {
   if (ws2812_state == state)
     return;
+
+  ws2812_state = state;
 
   switch (state)
   {
@@ -154,15 +147,37 @@ void set_rgb_led_state(RgbLedState state)
     case RgbLedState::Connected:
       rgbLed.SetColor(2, 3, 3);
       break;
+    case RgbLedState::BatteryLow:
+      rgbLed.SetColor(3, 0, 0);
+      break;
   }
+}
+
+void update_battery_status()
+{
+  auto battery_percent = get_battery_percent();
+
+  if (battery_percent == 0)
+  {
+    set_rgb_led_state(RgbLedState::BatteryLow);
+    delay(1000);
+    goToSleep();
+  }
+
+  bleGamepad.setPowerStateAll(
+    POWER_STATE_PRESENT,
+    POWER_STATE_DISCHARGING,
+    POWER_STATE_NOT_CHARGING,
+    battery_percent > 10 ? POWER_STATE_GOOD : POWER_STATE_CRITICAL);
+
+  bleGamepad.setBatteryLevel(battery_percent);
 }
 
 void setup() 
 {
   battery_adc_init();
-  auto battery_percent = get_battery_percent();
 
-  if (battery_percent == 0)
+  if (get_battery_mv() < BATTERY_VERY_EMPTY_MV)
     goToSleep();
     
   if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_GPIO)
@@ -181,6 +196,7 @@ void setup()
 
   pinMode(PIN_WS2812_LED_VCC, OUTPUT);
   gpio_set_drive_capability((gpio_num_t)PIN_WS2812_LED_VCC, GPIO_DRIVE_CAP_3);
+
   digitalWrite(PIN_WS2812_LED_VCC, 1);
   set_rgb_led_state(RgbLedState::NotConnected);
 
@@ -207,11 +223,14 @@ int32_t pressedButtons = 0;
 int32_t reportedButtons = 0;
 
 int32_t powerPressedAt = 0;
+int32_t pairPressedAt = 0;
 int32_t lastActivityAt = 0;
 int32_t batteryReadAt = 0;
- 
+
 void loop() 
 {
+  delay(1);
+
   if ((millis() - batteryReadAt) > 30*1000)
   {
     update_battery_status();
@@ -232,7 +251,7 @@ void loop()
   buttonsDebounce[7] += !digitalRead(PIN_FRET_4);
   buttonsDebounce[8] += !digitalRead(PIN_FRET_5);
 
-  auto powerWasPressed = !!(pressedButtons & 0x2);
+  auto previousButtons = pressedButtons;
 
   for (auto i = 0; i < 9; ++i) 
     if (buttonsDebounce[i] == 0xFF)
@@ -240,7 +259,13 @@ void loop()
     else if (buttonsDebounce[i] == 0)
       pressedButtons &= ~(1 << i);
 
+  if (previousButtons != pressedButtons)
+    lastActivityAt = millis();
+
+  auto powerWasPressed = !!(previousButtons & 0x2);
+  auto pairWasPressed = !!(previousButtons & 0x1);
   auto powerIsPressed = !!(pressedButtons & 0x2);
+  auto pairIsPressed = !!(pressedButtons & 0x1);
 
   if (!powerWasPressed && powerIsPressed)
     powerPressedAt = millis();
@@ -250,6 +275,15 @@ void loop()
     goToSleep();
   }
 
+  if (!pairWasPressed && pairIsPressed)
+    pairPressedAt = millis();
+  else if (pairWasPressed && pairIsPressed && (millis() - pairPressedAt) > 3000) //3 seconds to drop connections
+  {
+    bleGamepad.disconnectAll();
+    pairPressedAt = millis();
+    return;
+  }
+  
   if (bleGamepad.isConnected()) 
   {
     set_rgb_led_state(RgbLedState::Connected);
@@ -263,9 +297,6 @@ void loop()
       else if (!(reportedButtons & mask) && (pressedButtons & mask))
         bleGamepad.press(BUTTON_1 + i);
     }
-
-    if (pressedButtons != reportedButtons)
-      lastActivityAt = millis();
 
     reportedButtons = pressedButtons;
 
@@ -281,6 +312,4 @@ void loop()
     if ((millis() - lastActivityAt) > 10*60*1000) //10 mins if not connected
       goToSleep();
   }
-
-  delay(1);
 }
