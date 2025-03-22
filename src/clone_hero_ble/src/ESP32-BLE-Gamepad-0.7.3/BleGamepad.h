@@ -147,7 +147,6 @@ class BleGamepad
     void setAccelerometer(int16_t aX = 0, int16_t aY = 0, int16_t aZ = 0);
     void setMotionControls(int16_t gX = 0, int16_t gY = 0, int16_t gZ = 0, int16_t aX = 0, int16_t aY = 0, int16_t aZ = 0);
 
-
   protected:
     virtual void onStarted(NimBLEServer *pServer) {};
 };

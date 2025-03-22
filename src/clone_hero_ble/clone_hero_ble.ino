@@ -2,12 +2,19 @@
 #include "src/ESP32-BLE-Gamepad-0.7.3/BleGamepad.h"
 #include "driver/rtc_io.h"
 #include "esp_sleep.h"
+#include "sdkconfig.h"
 
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
 #include "ws2812.h"
+
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+  #define BLE_MAX_TX_POWER 20 //ESP_PWR_LVL_P20 
+#else
+  #define BLE_MAX_TX_POWER 9 //ESP_PWR_LVL_P9
+#endif
 
 #define BATTERY_ADC_UNIT ADC_UNIT_1
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_0 //gpio 0
@@ -62,7 +69,8 @@ enum class RgbLedState
   None,
   NotConnected,
   Connected,
-  BatteryLow
+  BatteryLow,
+  BondsDeleted,
   //
 };
 
@@ -150,6 +158,9 @@ void set_rgb_led_state(RgbLedState state)
     case RgbLedState::BatteryLow:
       rgbLed.SetColor(3, 0, 0);
       break;
+    case RgbLedState::BondsDeleted:
+      rgbLed.SetColor(3, 3, 0);
+      break;
   }
 }
 
@@ -209,13 +220,14 @@ void setup()
   pinMode(PIN_FRET_4, INPUT_PULLUP);
   pinMode(PIN_FRET_5, INPUT_PULLUP);
   
-  auto config = new BleGamepadConfiguration();
-  config->setButtonCount(9);
-  config->setWhichAxes(false, false, false, false, false, false, false, false);
-  config->setHatSwitchCount(0);
+  auto config = BleGamepadConfiguration();
+  config.setButtonCount(9);
+  config.setWhichAxes(false, false, false, false, false, false, false, false);
+  config.setHatSwitchCount(0);
+  config.setTXPowerLevel(BLE_MAX_TX_POWER);
 
   update_battery_status();
-  bleGamepad.begin(config);
+  bleGamepad.begin(&config);
 }
 
 uint8_t buttonsDebounce[9] = {0};
@@ -279,7 +291,9 @@ void loop()
     pairPressedAt = millis();
   else if (pairWasPressed && pairIsPressed && (millis() - pairPressedAt) > 3000) //3 seconds to drop connections
   {
+    set_rgb_led_state(RgbLedState::BondsDeleted);
     bleGamepad.disconnectAll();
+    bleGamepad.deleteAllBonds();
     pairPressedAt = millis();
     return;
   }
