@@ -11,13 +11,13 @@
 #include "ws2812.h"
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
-  #define BLE_MAX_TX_POWER 20 //ESP_PWR_LVL_P20 
+  #define BLE_MAX_TX_POWER 20 //ESP_PWR_LVL_P20, available only on c3/c6 and some others
 #else
   #define BLE_MAX_TX_POWER 9 //ESP_PWR_LVL_P9
 #endif
 
 #define BATTERY_ADC_UNIT ADC_UNIT_1
-#define BATTERY_ADC_CHANNEL ADC_CHANNEL_0 //gpio 0
+#define BATTERY_ADC_CHANNEL ADC_CHANNEL_0 //gpio 0 on esp32c3
 #define BATTERY_ADC_ATTEN ADC_ATTEN_DB_12
 #define BATTERY_ADC_BITWIDTH ADC_BITWIDTH_DEFAULT
 
@@ -31,8 +31,18 @@
 #define PIN_WS2812_LED_DATA 7
 
 //buttons are active-low with pullups
-#define PIN_STAR_BOOT 9 //is also used as BOOT button and PAIR button
-#define PIN_MENU_POWER 5 //is also used as POWER button
+
+//STAR is also used as BOOT button and PAIR button - this a dedicated bootstrap pin on esp32c3
+//when MCU is powered up (not waken from sleep) with BOOT button pressed it'll go straight to the ROM bootloader
+#define PIN_STAR_BOOT 9 
+
+//MENU is also used as POWER button - this is one of RTC deepsleep wakeup-capable pins on esp32c3
+#define PIN_MENU_POWER 5
+
+//i have 2 guitars but the wiring for the buttons 
+//other than STAR and MENU is random - 
+//i havent marked the wires and just fixed this later by following defines
+//so both controllers have the same layout seen by clone hero
 
 #define CLONE_HERO_BLUE
 
